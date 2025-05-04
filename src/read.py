@@ -1,49 +1,45 @@
 import serial
 import time
 import sys
-import csv
-# https://github.com/ehavugi/vectornav-imu/blob/master/imu.py
 
-# Open serial port
-ser = serial.Serial("/dev/ttyUSB0", baudrate=115200, timeout=1)  # adjust port as you needed
-csv_writer = csv.writer(open('imu_data.csv', 'w', newline=''))
-csv_writer.writerow(["Yaw", "Pitch", "Roll", "MagX", "MagY", "MagZ", 
-                      "AccX", "AccY", "AccZ", "GyroX", "GyroY", "GyroZ"])
+# Open serial port (adjust as needed for your platform)
+ser = serial.Serial("/dev/ttyUSB0", baudrate=115200, timeout=1)
+print(f"Connected to {ser.name}")
+
+elements = ["Yaw", "Pitch", "Roll", "MagX", "MagY", "MagZ",
+            "AccX", "AccY", "AccZ", "GyroX", "GyroY", "GyroZ"]
+
 def read_imu(ser):
     """
-    Reads IMU data from the serial port and returns a dictionary with keys:
-    "Yaw", "Pitch", "Roll", "MagX", "MagY", "MagZ", "AccX", "AccY", "AccZ", "GyroX", "GyroY", "GyroZ"
+    Reads and parses a line of IMU data from serial.
+    Returns a dictionary with keys for each sensor measurement.
     """
     line = ser.readline().decode('utf-8', errors='ignore').strip()
     if line.startswith("$VNYMR"):
         x = line.split(",")
-        elements = ["Yaw", "Pitch", "Roll", "MagX", "MagY", "MagZ", 
-                    "AccX", "AccY", "AccZ", "GyroX", "GyroY", "GyroZ"]
         if len(x) >= 13:
             data = {}
             for i, key in enumerate(elements):
                 value = x[i+1]
                 if key == "GyroZ":
-                    value = value.split("*")[0]  # Remove checksum
+                    value = value.split("*")[0]  # remove checksum
                 data[key] = value
             return data
     return None
 
-# Main loop
 try:
     print("Reading IMU data at 10 Hz. Press Ctrl+C to stop.")
     while True:
         imu_data = read_imu(ser)
         if imu_data:
             output = ' | '.join(f'{k}: {v}' for k, v in imu_data.items())
-            # Pad with spaces to overwrite old line
-            sys.stdout.write(f'\r{output.ljust(120)}')
+            sys.stdout.write(f'\r{output.ljust(140)}')
             sys.stdout.flush()
-            # Write to CSV
-            #csv_writer.writerow(imu_data.values())
-        time.sleep(0.1)
+        time.sleep(1/80)
+
 except KeyboardInterrupt:
-    print("\nStopping...")
+    print("\nStopped by user.")
+
 finally:
     ser.close()
     print("Serial port closed.")
