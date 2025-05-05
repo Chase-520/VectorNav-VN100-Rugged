@@ -72,7 +72,7 @@ class VN100:
         tuningMode	Enables dynamic tuning	0 = off,        1 = on
         """
         self.__ser.reset_input_buffer()
-        cmd = f"$VNWRG,35,{enable},{headingMode},{filteringMode},{tuningMode}*XX\r\n"
+        cmd = b"$VNWRG,35,{enable},{headingMode},{filteringMode},{tuningMode}*XX\r\n"
         self._write(cmd)
         print(self._read_response())
 
@@ -81,7 +81,7 @@ class VN100:
         """
         Read IMU data (Register 54) using the read_register method.
         """
-        return self.read_register(54)
+        return self.read_register(9)
 
 
     def read_register(self, reg_number: int):
@@ -93,7 +93,7 @@ class VN100:
         self._write(cmd)
         x = self._read_response()
         print(x)
-        x = str(x.strip()).split("*")[0].split(',')[2:]
+        x = str(x.strip()).split("*")[0].split(',')[1:]
         regs = self.__RREG.get(reg_number, [None, []])[1]
         for i, val in enumerate(x):
             print(f"{regs[i]}: {val}")
@@ -163,8 +163,9 @@ class VN100:
         RREG.update({38:["VPE Acceleration Basic tuning",['BaseTuningX',"BaseTuningY","BaseTuningZ","AdaptiveTuningx","AdaptiveTuningY","AdaptiveTuningZ","AdaptiveFilteringX","AdaptiveFilteringY","AdaptiveFilteringZ"]]})
         RREG.update({43:["Filter Startup Gyro Bias",["X-axis Gyro Bias Estimate","Y-axis Gyro Bias Estimate","Z-axis Gyro Bias Estimate"]]})
         RREG.update({40:["VPE Gyro Basic Tuning",["VAngularWalkX","VAngularWalkY","VAngularWalkZ","BaseTuningX","BaseTuningY","BaseTuningZ","AdaptiveTuningX","AdaptiveTuningY","AdaptiveTuningZ"]]})
-        RREG.update({54:["IMU",["Magx","MagY","MagZ","AccelX","AccelY","AccelZ","GyroX","GyroY","GyroZ","Temp","Pressure"]]})
-        RREG.update({80:["Delta theta and velocity",["DeltaTime","DeltaThetaX","DeltaThetaY","DeltaThetaZ","DeltaVelocitx","DeltaVolocityY","DeltaVolocityZ"]]})
+        RREG.update({54:["IMU",["Yaw","Pitch","Row","Magx","MagY","MagZ","AccelX","AccelY","AccelZ","GyroX","GyroY","GyroZ"]]})
+        RREG.update({80:["IMU",["Yaw","Pitch","Row","Magx","MagY","MagZ","AccelX","AccelY","AccelZ","GyroX","GyroY","GyroZ"]]})
+        #RREG.update({80:["Delta theta and velocity",["DeltaTime","DeltaThetaX","DeltaThetaY","DeltaThetaZ","DeltaVelocitx","DeltaVolocityY","DeltaVolocityZ"]]})
         # Hard/soft iron estimator
         RREG.update({44:["Magnetometer Calibration control",["HSIMode","HSIOutput","ConvergeRate"]]})
         RREG.update({47:["Calculated Magnetometer Calibration",["C[0,0]","C[0,1]","C[0,2]","C[1,0]","C[1,1]","C[1,2]","C[2,0]","C[2,1]","C[2,2]","B[0]","B[1]","B[2]"]]})
