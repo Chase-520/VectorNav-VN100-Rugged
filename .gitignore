@@ -3,3 +3,4 @@
 *.pyc
 src/__pycache__/
 test/__pycache__/
+vectornav-sdk-0-22-0/

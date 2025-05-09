@@ -81,7 +81,7 @@ class VN100:
         """
         Read IMU data (Register 54) using the read_register method.
         """
-        return self.read_register(9)
+        return self.read_register(54)
 
 
     def read_register(self, reg_number: int):
