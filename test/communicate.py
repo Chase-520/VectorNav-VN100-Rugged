@@ -3,11 +3,11 @@ from vectornav import Sensor, Registers
 import time
 vs = Sensor()
 
-vs.connect("/dev/ttyUSB0", Sensor.BaudRate.Baud115200)
+vs.connect("COM7", Sensor.BaudRate.Baud115200)
 if not vs.verifySensorConnectivity():
     raise Exception("Wrong baud rate or incorrect port")
 if not vs.verifySensorConnectivity():
-    vs.autoConnect("/dev/ttyUSB0")
+    vs.autoConnect("COM7")
 
 # set initialheaidng
 vs.setInitialHeading(0.0)
@@ -38,7 +38,7 @@ qmarRegister = Registers.QuatMagAccelRate()
 yprMarRegister = Registers.YprMagAccelAngularRates()
 
 startime = time.time()
-while(time.time()-startime <3):
+while(time.time()-startime <8):
     # vs.readRegister(yprRegister)
     # print(f"Current Reading: Yaw - {yprRegister.yaw}, Pitch - {yprRegister.pitch}, Roll - {yprRegister.roll} ")
 

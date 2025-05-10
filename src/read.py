@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 
 # Configuration
-DEFAULT_PORT = "/dev/ttyUSB0"
+DEFAULT_PORT = "COM7"
 BAUD_RATE = 115200
 FREQ_HZ = 80
 CSV_FILENAME = f"imu_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
