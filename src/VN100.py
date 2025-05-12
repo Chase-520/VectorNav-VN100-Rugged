@@ -1,6 +1,9 @@
 from vectornav import Sensor, Registers
 import time
 import sys
+import pyqtgraph as pg
+from pyqtgraph.Qt import QtGui, QtCore
+import numpy as np
 
 class VN100:
     def __init__(self, port="COM7"):
@@ -18,7 +21,44 @@ class VN100:
             raise Exception(f"Unable to connect to sensor at {self.port} with baud rate {self.baud_rate}")
         print(f"Connected to VN100 at {self.port} with baud rate {self.baud_rate}")
 
-    def set_initial_heading(self, heading=0.0):
+    def calibrate_bias(self, duration=3.0, rate=100):
+        """ Calibrate sensor biases over a short period. """
+        print(f"Calibrating for {duration} seconds at {rate} Hz... Please keep the sensor still.")
+        num_samples = int(duration * rate)
+
+        # Buffers for accumulating values
+        bias_accumulators = {
+            'GyroX': 0.0, 'GyroY': 0.0, 'GyroZ': 0.0,
+            'AccelX': 0.0, 'AccelY': 0.0, 'AccelZ': 0.0
+        }
+
+        for _ in range(num_samples):
+            data = self.read_sensor_data()
+            for key in bias_accumulators:
+                bias_accumulators[key] += data[key]
+            time.sleep(1.0 / rate)
+
+        # Compute averages
+        self.biases = {key: bias_accumulators[key] / num_samples for key in bias_accumulators}
+        print("Calibration complete. Estimated biases:")
+        for key, val in self.biases.items():
+            print(f"{key} bias: {val:.4f}")
+
+    def configure_bias(self):
+        import json
+        with open("src\sensor_bias.json", "r") as f:
+            bias_data = json.load(f)
+
+        gyro_bias = bias_data["gyro_bias"]
+        accel_bias = bias_data["accel_bias"]
+        self.biases ={
+            'GyroX': gyro_bias['x'], 'GyroY': gyro_bias['y'], 'GyroZ': gyro_bias['z'],
+            'AccelX': accel_bias['x'], 'AccelY': accel_bias['y'], 'AccelZ': accel_bias['z']
+        }
+        for key, val in self.biases.items():
+            print(f"{key} bias: {val:.4f}")
+
+    def configure_initial_heading(self, heading=0.0):
         """ Set initial heading of the sensor. """
         self.vs.setInitialHeading(heading)
         print(f"Initial heading set to {heading} degrees.")
@@ -39,24 +79,47 @@ class VN100:
         self.vs.writeRegister(vpe_control)
         print("VPE Control configured.")
 
+    def configure_filter(self):
+        """configure internal low pass filter"""
+        filter = Registers.ImuFilterControl()
+        accel_mode= Registers.ImuFilterControl.AccelFilterMode(1)
+        gyro_mode = Registers.ImuFilterControl.GyroFilterMode(1)
+        mag_mode  = Registers.ImuFilterControl.MagFilterMode(1)
+        filter.accelWindowSize = 10
+        filter.gyroWindowSize = 10
+        filter.magWindowSize = 4
+        filter.accelFilterMode = accel_mode
+        filter.gyroFilterMode = gyro_mode
+        filter.magFilterMode = mag_mode
+        self.vs.writeRegister(filter)
+        print("low-pass filter configured.")
+
+        
     def read_sensor_data(self):
-        """ Read and return sensor data as numeric values. """
+        """ Read and return sensor data, optionally bias-corrected. """
         self.vs.readRegister(self.ypr_mar_register)
         imu_data = {
-            'Yaw': self.ypr_mar_register.yaw,  # Store as a float
-            'Pitch': self.ypr_mar_register.pitch,  # Store as a float
-            'Roll': self.ypr_mar_register.roll,  # Store as a float
-            'AccelX': self.ypr_mar_register.accelX,  # Store as a float
-            'AccelY': self.ypr_mar_register.accelY,  # Store as a float
-            'AccelZ': self.ypr_mar_register.accelZ,  # Store as a float
-            'MagX': self.ypr_mar_register.magX,  # Store as a float
-            'MagY': self.ypr_mar_register.magY,  # Store as a float
-            'MagZ': self.ypr_mar_register.magZ,  # Store as a float
-            'GyroX': self.ypr_mar_register.gyroX,  # Store as a float
-            'GyroY': self.ypr_mar_register.gyroY,  # Store as a float
-            'GyroZ': self.ypr_mar_register.gyroZ,  # Store as a float
+            'Yaw': self.ypr_mar_register.yaw,
+            'Pitch': self.ypr_mar_register.pitch,
+            'Roll': self.ypr_mar_register.roll,
+            'AccelX': self.ypr_mar_register.accelX,
+            'AccelY': self.ypr_mar_register.accelY,
+            'AccelZ': self.ypr_mar_register.accelZ,
+            'MagX': self.ypr_mar_register.magX,
+            'MagY': self.ypr_mar_register.magY,
+            'MagZ': self.ypr_mar_register.magZ,
+            'GyroX': self.ypr_mar_register.gyroX,
+            'GyroY': self.ypr_mar_register.gyroY,
+            'GyroZ': self.ypr_mar_register.gyroZ,
         }
+
+        # Apply bias correction if available
+        if hasattr(self, 'biases'):
+            for key in self.biases:
+                imu_data[key] -= self.biases[key]
+
         return imu_data
+
 
     def stream_data(self, duration=10, rate=20):
         """ Stream IMU data for a given duration and rate. """
@@ -77,6 +140,60 @@ class VN100:
             print("\n\nStreaming stopped by user.")
 
 
+
+    def visualize_ypr_and_imu(self, duration=20, rate=80):
+        from pyqtgraph.Qt import QtCore, QtWidgets
+        import pyqtgraph as pg
+        import numpy as np
+
+        app = QtWidgets.QApplication([])
+
+        win = pg.GraphicsLayoutWidget(show=True, title="VN100 Real-Time IMU Visualization")
+        win.resize(1200, 800)
+
+        data_len = int(duration * rate)
+        x = np.linspace(-data_len, 0, data_len)
+
+        # Create plots
+        plots = {}
+        curves = {}
+        sensors = {
+            "YPR": ("Yaw", "Pitch", "Roll"),
+            "Accel": ("AccelX", "AccelY", "AccelZ"),
+            "Mag": ("MagX", "MagY", "MagZ"),
+            "Gyro": ("GyroX", "GyroY", "GyroZ")
+        }
+
+        for i, (label, channels) in enumerate(sensors.items()):
+            p = win.addPlot(title=label)
+            p.addLegend()
+            plots[label] = p
+            curves[label] = {}
+            for j, axis in enumerate(channels):
+                color = ['y', 'r', 'b'][j]
+                curves[label][axis] = p.plot(pen=color, name=axis)
+            if i < len(sensors) - 1:
+                win.nextRow()
+
+        # Initialize data
+        data_buffers = {label: {axis: np.zeros(data_len) for axis in axes} for label, axes in sensors.items()}
+
+        def update():
+            imu = self.read_sensor_data()
+
+            for label, axes in sensors.items():
+                for axis in axes:
+                    buffer = data_buffers[label][axis]
+                    buffer[:] = np.roll(buffer, -1)
+                    buffer[-1] = imu[axis]
+                    curves[label][axis].setData(x, buffer)
+
+        timer = QtCore.QTimer()
+        timer.timeout.connect(update)
+        timer.start(int(1000 / rate))
+
+        app.exec_()
+
     def disconnect(self):
         """ Disconnect from the sensor. """
         self.vs.disconnect()
@@ -86,8 +203,14 @@ class VN100:
 if __name__ == "__main__":
     sensor = VN100(port="COM7")
     sensor.connect()
-    sensor.set_initial_heading(0.0)
+    sensor.configure_initial_heading(0.0)
     sensor.configure_async_output()
     sensor.configure_vpe()
-    sensor.stream_data(duration=10, rate=20)
+    sensor.configure_filter()
+
+    sensor.configure_bias()
+
+    # sensor.stream_data(duration=20, rate=80)
+    sensor.visualize_ypr_and_imu(duration=20, rate=80)
     sensor.disconnect()
+

@@ -5,24 +5,20 @@ from src.VN100 import VN100
 
 
 class HighPassFilter:
-    def __init__(self, cutoff_freq, fs, order=4):
-        self.cutoff = cutoff_freq
-        self.fs = fs
-        self.order = order
-
-        # Design filter coefficients
-        self.b, self.a = butter(order, cutoff_freq / (0.5 * fs), btype='high', analog=False)
-
-        # Initialize filter states for 3 axes (x, y, z)
-        self.zi = [lfilter_zi(self.b, self.a) * 0.0 for _ in range(3)]  # start with zero input
-        self.last_output = [0.0, 0.0, 0.0]
+    def __init__(self, alpha=0.9):
+        self.alpha = alpha
+        self.prev_input = [0.0, 0.0, 0.0]
+        self.prev_output = [0.0, 0.0, 0.0]
 
     def filter(self, accel):
         filtered = []
         for i in range(3):
-            y, self.zi[i] = lfilter(self.b, self.a, [accel[i]], zi=self.zi[i])
-            filtered.append(y[0])
+            y = self.alpha * (self.prev_output[i] + accel[i] - self.prev_input[i])
+            filtered.append(y)
+            self.prev_output[i] = y
+            self.prev_input[i] = accel[i]
         return filtered
+
 
 
 class Kalman1D:
@@ -74,7 +70,7 @@ class Localization:
             return self.position, self.velocity
 
         if self.hp_filter is None:
-            self.hp_filter = HighPassFilter(cutoff_freq=0.1, fs=1.0 / dt)
+            self.hp_filter = HighPassFilter(alpha=0.7)
 
         # High-pass filter to remove low-frequency components (gravity)
         filtered_accel = self.hp_filter.filter(accel)
@@ -92,67 +88,113 @@ class Localization:
 
         acc_world = [ax_world, ay_world, az_world]
 
-        # Update velocity and position
+        # Update velocity and position (no Kalman filtering)
         for i in range(3):
             self.velocity[i] += acc_world[i] * dt
             self.position[i] += self.velocity[i] * dt
-            # Use Kalman filter to smooth position estimates
-            self.position[i] = self.kalman_filters[i].update(self.position[i], dt)
 
-        return self.position, self.velocity
+
+
+        return self.position, self.velocity, filtered_accel
+    
+    def visualize_position_velocity_accel(self,sensor, duration=20, rate=80):
+        """Real-time plot of position, velocity, and acceleration in one window with separate rows."""
+        from pyqtgraph.Qt import QtCore, QtWidgets
+        import pyqtgraph as pg
+        import time
+
+        # Create Qt application
+        app = QtWidgets.QApplication([])
+
+        # Create a single main window
+        win = pg.GraphicsLayoutWidget(title="VN100 Position, Velocity, Acceleration")
+        win.resize(1000, 900)
+
+        # Plot titles and colors
+        colors = ['r', 'g', 'b']
+        labels = ['X', 'Y', 'Z']
+
+        # Position Plot
+        pos_plot = win.addPlot(title="Position (X, Y, Z)")
+        pos_plot.addLegend()
+        pos_curves = [pos_plot.plot(pen=c, name=f'{l} Position') for c, l in zip(colors, labels)]
+        win.nextRow()
+
+        # Velocity Plot
+        vel_plot = win.addPlot(title="Velocity (Vx, Vy, Vz)")
+        vel_plot.addLegend()
+        vel_curves = [vel_plot.plot(pen=c, name=f'{l} Velocity') for c, l in zip(colors, labels)]
+        win.nextRow()
+
+        # Acceleration Plot
+        accel_plot = win.addPlot(title="Acceleration (Ax, Ay, Az)")
+        accel_plot.addLegend()
+        accel_curves = [accel_plot.plot(pen=c, name=f'{l} Accel') for c, l in zip(colors, labels)]
+
+        # Initialize data buffers
+        data_len = int(duration * rate)
+        x_vals = list(range(-data_len, 0))
+        buffers = {
+            'position': [[0.0] * data_len for _ in range(3)],
+            'velocity': [[0.0] * data_len for _ in range(3)],
+            'accel':    [[0.0] * data_len for _ in range(3)],
+        }
+
+        # Show window
+        win.show()
+        self._start_time = time.time()
+
+        # Timer callback
+        def update():
+            nonlocal buffers
+
+            # Read sensor data
+            data = sensor.read_sensor_data()
+            accel = [data["AccelX"], data["AccelY"], data["AccelZ"]]
+            yaw = data["Yaw"]
+            now = time.time() - self._start_time
+
+            # Update localization (requires self.update method)
+            pos, vel, filtered_accel = self.update(accel, 0, now)
+
+            # Update buffers
+            for i in range(3):
+                buffers['position'][i] = buffers['position'][i][1:] + [pos[i]]
+                buffers['velocity'][i] = buffers['velocity'][i][1:] + [vel[i]]
+                buffers['accel'][i]    = buffers['accel'][i][1:]    + [filtered_accel[i]]
+
+            # Plot data
+            for i in range(3):
+                pos_curves[i].setData(x_vals, buffers['position'][i])
+                vel_curves[i].setData(x_vals, buffers['velocity'][i])
+                accel_curves[i].setData(x_vals, buffers['accel'][i])
+
+        # Timer setup
+        timer = QtCore.QTimer()
+        timer.timeout.connect(update)
+        timer.start(int(1000 / rate))
+
+        # Start Qt event loop
+        app.exec_()
 
 
 if __name__ == "__main__":
-    import sys
-    # Sample data for testing
-    accel_data = [0.05, -0.01, -9.81]  # Accelerometer readings (ax, ay, az)
-    yaw_angle = 30.0  # Heading in degrees
-    timestamp = 0.1  # Initial timestamp
-
-    # Initialize the localization class
     localization = Localization()
 
-    # Initialize the VN100 sensor
     vs = VN100(port="COM7")
     vs.connect()
-    vs.set_initial_heading(0.0)
+    vs.configure_initial_heading(0.0)
     vs.configure_async_output()
     vs.configure_vpe()
+    vs.configure_filter()
+    vs.configure_bias()
 
-    # Simulate updates
+    localization.vs = vs  # Inject VN100 into Localization
+
     try:
-        start_time = time.time()
-        while True:
-            # Read data from the sensor
-            data = vs.read_sensor_data()    
-
-            # Ensure data contains the necessary accelerometer and yaw information
-            if "AccelX" not in data or "AccelY" not in data or "AccelZ" not in data or "Yaw" not in data:
-                print("Error: Missing sensor data.")
-                break
-
-            # Extract accelerometer and yaw data
-            accel_data = [data["AccelX"], data["AccelY"], data["AccelZ"]]
-            yaw_angle = data["Yaw"]
-
-            # Calculate the timestamp
-            timestamp = time.time() - start_time
-
-            # Update localization with accelerometer data and yaw
-            position, velocity = localization.update(accel_data, yaw_angle, timestamp)
-
-            # Print out the current position and velocity
-            # Print out the current position and velocity
-            output = f"Time: {timestamp:.2f}s | Position: {[round(float(x), 4) for x in position]} | Velocity: {[round(float(x), 4) for x in velocity]}"
-            sys.stdout.write(f'\r{output.ljust(140)}')  # Overwrites the previous line in the terminal
-            sys.stdout.flush()
-
-
-            time.sleep(0.05)  # Small delay to avoid spamming output too fast
-
+        localization.visualize_position_velocity_accel(duration=20, rate=80, sensor=vs)
     except KeyboardInterrupt:
-        print("\n\nStreaming stopped by user.")
-
-    # Disconnect the sensor
-    vs.disconnect()
-    print("Disconnected successfully.")
+        print("\nVisualization stopped.")
+    finally:
+        vs.disconnect()
+        print("Disconnected successfully.")

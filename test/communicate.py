@@ -23,6 +23,12 @@ asyncDataOutputType.serialPort = Registers.AsyncOutputType.SerialPort.Serial1
 vs.writeRegister(asyncDataOutputType)
 print(f"ADOR Configured")
 
+asyncDataOutputFreq= Registers.AsyncOutputFreq()
+asyncDataOutputFreq.adof = Registers.AsyncOutputFreq.Adof.Rate100Hz
+asyncDataOutputFreq.serialPort = Registers.AsyncOutputFreq.SerialPort.Serial1
+vs.writeRegister(asyncDataOutputFreq)
+print("ADOF Configured")
+
 # Configure VPE
 vpeControl = Registers.VpeBasicControl()
 vpeControl.headingMode = Registers.VpeBasicControl.HeadingMode.Relative
@@ -30,6 +36,16 @@ vpeControl.filteringMode = Registers.VpeBasicControl.FilteringMode.AdaptivelyFil
 vs.writeRegister(vpeControl)
 print(f"VPE Control Configured")
 
+# filter
+filter = Registers.ImuFilterControl()
+filter.accelWindowSize = 10
+filter.gyroWindowSize = 10
+filter.magWindowSize = 4
+gyro_mode = Registers.ImuFilterControl.GyroFilterMode(1)
+gyro_mode.comp = 1  # Enable 'comp' mode (1 = true/on)
+filter_control = Registers.ImuFilterControl()
+filter_control.gyroFilterMode = gyro_mode  # Assign the configured mode
+vs.writeRegister(filter)
 # Prepare register
 yprMarRegister = Registers.YprMagAccelAngularRates()
 
@@ -50,7 +66,11 @@ try:
             'MagZ': f"{yprMarRegister.magZ:.2f}",
             'GyroX': f"{yprMarRegister.gyroX:.3f}",
             'GyroY': f"{yprMarRegister.gyroY:.3f}",
-            'GyroZ': f"{yprMarRegister.gyroZ:.3f}"
+            'GyroZ': f"{yprMarRegister.gyroZ:.3f}",
+            # 'pos_x':f"{GnssCompassBaseline.positionX:.3f}",
+            # 'pos_y':f"{GnssCompassBaseline.positionY:.3f}",
+            # 'pos_z':f"{GnssCompassBaseline.positionZ:.3f}"
+
         }
 
         output = ' | '.join(f'{k}: {imu_data[k]}' for k in FIELDS)
