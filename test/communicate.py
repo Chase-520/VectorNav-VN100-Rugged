@@ -1,70 +1,66 @@
 from vectornav import Sensor, Registers
-
 import time
-vs = Sensor()
+import sys
 
+FIELDS = ['Yaw', 'Pitch', 'Roll', 'AccelX', 'AccelY', 'AccelZ', 'MagX', 'MagY', 'MagZ', 'GyroX', 'GyroY', 'GyroZ']
+
+vs = Sensor()
 vs.connect("COM7", Sensor.BaudRate.Baud115200)
+
 if not vs.verifySensorConnectivity():
     raise Exception("Wrong baud rate or incorrect port")
-if not vs.verifySensorConnectivity():
-    vs.autoConnect("COM7")
 
-# set initialheaidng
 vs.setInitialHeading(0.0)
 
-# Create an empty register object of the necessary type, where the data member will be populated when the sensor responds to our "read register" request
 modelRegister = Registers.Model()
-
 vs.readRegister(modelRegister)
 print(f"Sensor Model Number: {modelRegister.model}")
 
-#
+# Configure async output type
 asyncDataOutputType = Registers.AsyncOutputType()
 asyncDataOutputType.ador = Registers.AsyncOutputType.Ador.YPR
 asyncDataOutputType.serialPort = Registers.AsyncOutputType.SerialPort.Serial1
-
 vs.writeRegister(asyncDataOutputType)
 print(f"ADOR Configured")
 
-#
+# Configure VPE
 vpeControl = Registers.VpeBasicControl()
-vpeControl.headingMode = Registers.VpeBasicControl.HeadingMode.Absolute
+vpeControl.headingMode = Registers.VpeBasicControl.HeadingMode.Relative
 vpeControl.filteringMode = Registers.VpeBasicControl.FilteringMode.AdaptivelyFiltered
-vpeControl.tuningMode = Registers.VpeBasicControl.TuningMode.Adaptive
+vs.writeRegister(vpeControl)
+print(f"VPE Control Configured")
 
-#
-yprRegister = Registers.YawPitchRoll()
-qmarRegister = Registers.QuatMagAccelRate()
+# Prepare register
 yprMarRegister = Registers.YprMagAccelAngularRates()
 
-startime = time.time()
-while(time.time()-startime <8):
-    # vs.readRegister(yprRegister)
-    # print(f"Current Reading: Yaw - {yprRegister.yaw}, Pitch - {yprRegister.pitch}, Roll - {yprRegister.roll} ")
+# Start live printing
+print("\nStreaming IMU data (Press Ctrl+C to stop):\n")
+try:
+    while True:
+        vs.readRegister(yprMarRegister)
+        imu_data = {
+            'Yaw': f"{yprMarRegister.yaw:.2f}",
+            'Pitch': f"{yprMarRegister.pitch:.2f}",
+            'Roll': f"{yprMarRegister.roll:.2f}",
+            'AccelX': f"{yprMarRegister.accelX:.3f}",
+            'AccelY': f"{yprMarRegister.accelY:.3f}",
+            'AccelZ': f"{yprMarRegister.accelZ:.3f}",
+            'MagX': f"{yprMarRegister.magX:.2f}",
+            'MagY': f"{yprMarRegister.magY:.2f}",
+            'MagZ': f"{yprMarRegister.magZ:.2f}",
+            'GyroX': f"{yprMarRegister.gyroX:.3f}",
+            'GyroY': f"{yprMarRegister.gyroY:.3f}",
+            'GyroZ': f"{yprMarRegister.gyroZ:.3f}"
+        }
 
-    # vs.readRegister(qmarRegister)
-    # print(f"acc_x - {qmarRegister.accelX}, acc_y - {qmarRegister.accelY}, acc_z - {qmarRegister.accelZ}")
+        output = ' | '.join(f'{k}: {imu_data[k]}' for k in FIELDS)
+        sys.stdout.write(f'\r{output.ljust(140)}')
+        sys.stdout.flush()
 
-    vs.readRegister(yprMarRegister)
-    print(f"Current Reading: Yaw - {yprMarRegister.yaw}, Pitch - {yprMarRegister.pitch}, Roll - {yprMarRegister.roll}, accZ - {yprMarRegister.accelZ} ")
+        time.sleep(0.05)  # Small delay to avoid spamming output too fast
 
-vs.reset()
-print("reseting ...")
-time.sleep(2)
-print("reset success")
-
-startime = time.time()
-while(time.time()-startime <3):
-    # vs.readRegister(yprRegister)
-    # print(f"Current Reading: Yaw - {yprRegister.yaw}, Pitch - {yprRegister.pitch}, Roll - {yprRegister.roll} ")
-
-    # vs.readRegister(qmarRegister)
-    # print(f"acc_x - {qmarRegister.accelX}, acc_y - {qmarRegister.accelY}, acc_z - {qmarRegister.accelZ}")
-
-    vs.readRegister(yprMarRegister)
-    print(f"Current Reading: Yaw - {yprMarRegister.yaw}, Pitch - {yprMarRegister.pitch}, Roll - {yprMarRegister.roll}, accZ - {yprMarRegister.accelZ} ")
-
-
+except KeyboardInterrupt:
+    print("\n\nStreaming stopped by user.")
 
 vs.disconnect()
-print("exit successfully")
+print("Disconnected successfully.")
