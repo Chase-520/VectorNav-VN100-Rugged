@@ -1,26 +1,90 @@
-from vectornav import Sensor, Registers
+import vectornav
+from vectornav import Sensor, ByteBuffer, Registers
+from vectornav.Plugins import FileExporter, SimpleLogger, ExporterCsv
+import os
 import time
+from datetime import datetime
 import sys
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtGui, QtCore
 import numpy as np
+import traceback
+
+def export_bin_to_csv(bin_file_path: str, output_folder: str, with_timestamps: bool = False):
+    """
+    Converts a .bin file recorded with SimpleLogger into multiple CSV files using VectorNav SDK.
+    
+    Parameters:
+    - bin_file_path (str): Path to the .bin file.
+    - output_folder (str): Folder where CSV files will be saved.
+    - with_timestamps (bool): If True, include system timestamps in CSV.
+    """
+    if not os.path.isfile(bin_file_path):
+        raise FileNotFoundError(f"Binary file not found: {bin_file_path}")
+
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    file_exporter = FileExporter()
+    file_exporter.addCsvExporter(output_folder, enableSystemTimeStamps=with_timestamps)
+    
+    print(f"Exporting {bin_file_path} → CSV files in {output_folder} ...")
+    file_exporter.processFile(bin_file_path)
+    print("Export complete.")
+
+def parse_baudRate(rate: int):
+    if rate==115200:
+        rate = Sensor.BaudRate.Baud115200
+    elif rate==128000:
+        rate = Sensor.BaudRate.Baud128000
+    elif rate==230400:
+        rate = Sensor.BaudRate.Baud230400
+    elif rate==460800:
+        rate = Sensor.BaudRate.Baud460800
+    else:
+        rate = Sensor.BaudRate.Baud115200
+    return rate
 
 class VN100:
-    def __init__(self, port="COM7"):
+    def __init__(self, port="COM7", baudrate:int=230400):
         self.vs = Sensor()
         self.port = port
-        self.baud_rate = Sensor.BaudRate.Baud115200
+        self.baud_rate = parse_baudRate(baudrate)
         self.model_register = Registers.Model()
         self.ypr_mar_register = Registers.YprMagAccelAngularRates()
+        self.CSV_FILENAME = f"imu_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        self.bias = {
+            'GyroX': 0.0, 'GyroY': 0.0, 'GyroZ': 0.0,
+            'AccelX': 0.0, 'AccelY': 0.0, 'AccelZ': 0.0
+        }
 
     def connect(self):
         """ Connect to the VN100 sensor. """
         print("Connecting to VN100...")
         self.vs.connect(self.port, self.baud_rate)
         if not self.vs.verifySensorConnectivity():
-            raise Exception(f"Unable to connect to sensor at {self.port} with baud rate {self.baud_rate}")
-        print(f"Connected to VN100 at {self.port} with baud rate {self.baud_rate}")
+            self.vs.autoConnect(self.port)
+            if not self.vs.verifySensorConnectivity():
+                raise Exception(f"Unable to connect to sensor at {self.port} with baud rate {self.baud_rate}")
+            print(f"buad rate mismatch, current baud rate {self.vs.connectedBaudRate()}")
+        else:
+            print(f"Connected to VN100 at {self.port} with baud rate {self.baud_rate}")
 
+        modelRegister = Registers.Model()
+        self.vs.readRegister(modelRegister)
+        print(f"Sensor Model Number: {modelRegister.model}")
+
+    def configure_baud_rate(self, rate:int = 115200):
+        """ Configure the baud rate of the sensor. """
+        baudrateRegister = Registers.BaudRate()
+        rate = parse_baudRate(rate)
+        
+        port = Registers.BaudRate.SerialPort.Serial1
+        baudrateRegister.baudRate = rate
+        baudrateRegister.serialPort = port
+        self.vs.writeRegister(baudrateRegister)
+        print(f"Baud rate configured to {rate} on {port}")
+        
     def calibrate_bias(self, duration=3.0, rate=100):
         """ Calibrate sensor biases over a short period. """
         print(f"Calibrating for {duration} seconds at {rate} Hz... Please keep the sensor still.")
@@ -63,19 +127,27 @@ class VN100:
         self.vs.setInitialHeading(heading)
         print(f"Initial heading set to {heading} degrees.")
 
-    def configure_async_output(self, ador=Registers.AsyncOutputType.Ador.YPR, serial_port=Registers.AsyncOutputType.SerialPort.Serial1):
+
+    def configure_async_output(self, outputType:str = "YPR"):
         """ Configure asynchronous data output type. """
         async_data_output = Registers.AsyncOutputType()
-        async_data_output.ador = ador
-        async_data_output.serialPort = serial_port
+        async_data_output.ador = Registers.AsyncOutputType.Ador.ACC
+        async_data_output.serialPort = Registers.AsyncOutputType.SerialPort.Serial1
         self.vs.writeRegister(async_data_output)
         print("Asynchronous output configured.")
+    
+    def configure_async_output_freq(self):
+        asyncDataOutputFreq= Registers.AsyncOutputFreq()
+        asyncDataOutputFreq.adof = Registers.AsyncOutputFreq.Adof.Rate100Hz
+        asyncDataOutputFreq.serialPort = Registers.AsyncOutputFreq.SerialPort.Serial1
+        self.vs.writeRegister(asyncDataOutputFreq)
+        print("Asynchronous output frequency configured.")
 
-    def configure_vpe(self, heading_mode=Registers.VpeBasicControl.HeadingMode.Relative, filtering_mode=Registers.VpeBasicControl.FilteringMode.AdaptivelyFiltered):
+    def configure_vpe(self):
         """ Configure VPE (Vector Processing Engine). """
         vpe_control = Registers.VpeBasicControl()
-        vpe_control.headingMode = heading_mode
-        vpe_control.filteringMode = filtering_mode
+        vpe_control.headingMode = Registers.VpeBasicControl.HeadingMode.Relative
+        vpe_control.filteringMode = Registers.VpeBasicControl.FilteringMode.AdaptivelyFiltered
         self.vs.writeRegister(vpe_control)
         print("VPE Control configured.")
 
@@ -191,26 +263,67 @@ class VN100:
         timer = QtCore.QTimer()
         timer.timeout.connect(update)
         timer.start(int(1000 / rate))
-
         app.exec_()
 
+    def logger(self, duration=5):
+        """
+        Method to log sensor data to a file for a given duration.
+        Args:
+            file_path (str): The file path to save the log.
+            duration (float): The duration to log data (in seconds).
+        """
+        csvExporter = ExporterCsv("csv_output", True)
+        self.vs.subscribeToMessage(
+            csvExporter.getQueuePtr(),
+            vectornav.Registers.BinaryOutputMeasurements(),
+            vectornav.FaPacketDispatcher.SubscriberFilterType.AnyMatch
+        )
+        
+        self.vs.subscribeToMessage(
+            csvExporter.getQueuePtr(),
+            "VN",
+            vectornav.AsciiPacketDispatcher.SubscriberFilterType.StartsWith
+        )
+
+        csvExporter.start()
+        print("Logging to ", "csv_output")
+        
+        time.sleep(duration)
+
+        csvExporter.stop()
+        print("ExportFromSensor example complete.")
+
+
+        
     def disconnect(self):
         """ Disconnect from the sensor. """
         self.vs.disconnect()
         print("Disconnected successfully.")
 
+
+
 # Usage Example
 if __name__ == "__main__":
-    sensor = VN100(port="COM7")
-    sensor.connect()
-    sensor.configure_initial_heading(0.0)
-    sensor.configure_async_output()
-    sensor.configure_vpe()
-    sensor.configure_filter()
+    try:
+        sensor = VN100(port="COM7",baudrate=115200)
+        sensor.connect()
+        # sensor.configure_baud_rate(230400)
+        # sensor.configure_initial_heading(0.0)
+        sensor.configure_async_output()
+        sensor.configure_async_output_freq()
+        sensor.configure_vpe()
+        sensor.configure_filter()
 
-    sensor.configure_bias()
+        # sensor.configure_bias()
 
-    # sensor.stream_data(duration=20, rate=80)
-    sensor.visualize_ypr_and_imu(duration=20, rate=80)
-    sensor.disconnect()
+        # sensor.stream_data(duration=20, rate=80)
+        # sensor.visualize_ypr_and_imu(duration=20, rate=80)
+        sensor.logger(file_path="log.bin", duration=5)
+        # export_bin_to_csv("log.bin", "csv_output", with_timestamps=True)
+        sensor.disconnect()
+    except Exception as e:
+        sensor.disconnect()
+        print(e)
+        traceback.print_exc()  # This prints the full traceback
+
 
