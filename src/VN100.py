@@ -41,6 +41,8 @@ def parse_baudRate(rate: int):
         rate = Sensor.BaudRate.Baud230400
     elif rate==460800:
         rate = Sensor.BaudRate.Baud460800
+    elif rate==921600:
+        rate = Sensor.BaudRate.Baud921600
     else:
         rate = Sensor.BaudRate.Baud115200
     return rate
@@ -142,6 +144,23 @@ class VN100:
         asyncDataOutputFreq.serialPort = Registers.AsyncOutputFreq.SerialPort.Serial1
         self.vs.writeRegister(asyncDataOutputFreq)
         print("Asynchronous output frequency configured.")
+    def configure_binary_output(self):
+        """ Configure binary output settings. """
+        #help(Registers.BinaryOutput)
+        binary_output = vectornav.Registers.BinaryOutput()
+
+        binary_output.asyncMode =1
+        binary_output.rateDivisor = 1
+        
+        Common = vectornav.Registers._BinaryOutput.Common(0)
+        Common.accel = 1
+        Common.angularRate = 1
+        binary_output.common = Common
+
+
+        self.vs.writeRegister(binary_output)
+        print("Binary output configured.")
+        pass
 
     def configure_vpe(self):
         """ Configure VPE (Vector Processing Engine). """
@@ -305,20 +324,21 @@ class VN100:
 # Usage Example
 if __name__ == "__main__":
     try:
-        sensor = VN100(port="COM7",baudrate=115200)
+        sensor = VN100(port="COM7",baudrate=921600)
         sensor.connect()
-        # sensor.configure_baud_rate(230400)
+        # sensor.configure_baud_rate(921600)
         # sensor.configure_initial_heading(0.0)
-        sensor.configure_async_output()
-        sensor.configure_async_output_freq()
-        sensor.configure_vpe()
-        sensor.configure_filter()
-
+        # sensor.configure_async_output()
+        # sensor.configure_binary_output()
+        # sensor.configure_async_output_freq()
+        # sensor.configure_vpe()
+        # sensor.configure_filter()
+        #print(f"sensor data: {sensor.read_sensor_data()}")
         # sensor.configure_bias()
 
         # sensor.stream_data(duration=20, rate=80)
         # sensor.visualize_ypr_and_imu(duration=20, rate=80)
-        sensor.logger(file_path="log.bin", duration=5)
+        # sensor.logger(file_path="log.bin", duration=5)
         # export_bin_to_csv("log.bin", "csv_output", with_timestamps=True)
         sensor.disconnect()
     except Exception as e:
