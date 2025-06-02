@@ -1,0 +1,5 @@
+LICENSE.txt
+vectornav.egg-info/PKG-INFO
+vectornav.egg-info/SOURCES.txt
+vectornav.egg-info/dependency_links.txt
+vectornav.egg-info/top_level.txt
